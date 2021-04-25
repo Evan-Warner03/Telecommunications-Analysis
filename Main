@@ -1,0 +1,199 @@
+# Made by Evan Warner
+# April 25, 2021
+
+import random
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
+import pandas as pd
+import time
+
+def generate_calls(n):
+    '''
+    Generates n calls with columns: Provider, Model, Method, and Radius
+    '''
+    effects = [6, 0, 8, 4, 2, 5, 10, -1, 7]
+    calls = []
+    for i in range(n):
+        call = []
+        call.append(random.randint(1, 3))
+        call.append(random.randint(1, 3))
+        call.append(random.randint(1, 3))
+        
+        radius = 0
+        for ii in range(len(call)):
+            radius += effects[(ii * 3) + call[ii] - 1]
+        
+        call.append(radius)
+        calls.append(call)
+    
+    return calls
+
+def augment_calls(calls):
+    '''
+    Given a set of calls with columns: Provider, Model, Method, and Radius,
+    splits each of Provider, Model, and Method into three separate columns
+    '''
+    new_calls = []
+    for call in calls:
+        new_call = []
+        for i in range(len(call) - 1):
+            for ii in range(3):
+                if ii + 1 == call[i]:
+                    new_call.append(1)
+                else:
+                    new_call.append(0)
+        new_call.append(call[3])
+        new_calls.append(new_call)
+    return new_calls
+
+
+def print_calls(calls, augmented=False):
+    '''
+    Prints out a given list of calls
+    '''
+    if not augmented:
+        print("PROVIDER | MODEL | METHOD | RADIUS")
+        print("----------------------------------")
+    else:
+        print("PRO1 | PRO2 | PRO3 | MOD1 | MOD2 | MOD3 | MET1 | MET2 | MET3 | RADIUS")
+        print("---------------------------------------------------------------------")
+        
+    for c in calls:
+        if not augmented:
+            print("{:^7}  | {:^6}| {:^6} | {:^7}".format(c[0], c[1], c[2], c[3]))
+        else:
+            print("{:^3}  | {:^3}  | {:^3}  | {:^3}  | {:^3}  | {:^3}  | {:^3}  | {:^3}  | {:^3}  | {:^6}".format(c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9]))
+    
+    print()
+
+
+def split_training_data(data):
+    '''
+    Given a dataset of calls, separates the Radius column and returns it 
+    separately
+    '''
+    answers = []
+    for i in range(len(data)):
+        answers.append([data[i][9]])
+        data[i].pop(9)
+        
+    return data, answers
+
+
+def create_model(data):
+    '''
+    Creates a 64x64x1 neural network which takes in a Provider #, a
+    Model #, and a Method #, and predicts the resulting location radius
+    for the call
+    '''
+    model = keras.Sequential([
+        layers.Dense(64, activation=tf.nn.relu, input_shape=[len(data[0])]),
+        layers.Dense(64, activation=tf.nn.relu),
+        layers.Dense(1)
+    ])
+    
+    optimizer = tf.keras.optimizers.RMSprop(0.001)
+    
+    model.compile(loss="mse",
+                  optimizer=optimizer,
+                  metrics=["mae", "mse"])
+    
+    return model
+
+
+def test_accuracy(predictions, answers, print_all=False):
+    '''
+    Finds the average error in a set of predictions and answers
+    '''
+    average_error = 0
+    for i in range(len(predictions)):
+        if print_all:
+            print("Predicted: {:.2f} Metres | Actual: {} Metres".format(predictions[i][0], answers[i][0]))
+            
+        average_error += abs(predictions[i][0] - answers[i][0])
+        
+    average_error = average_error/len(predictions)
+    print("Average error of {:.2f} Metres over {} tests".format(average_error, len(predictions)))
+
+
+def find_correlation(model):
+    '''
+    Given a model for predicting the location radius of calls, outputs an
+    estimate for how changing certain elements in a call will affect the
+    location radius
+    '''
+    columns = ["Provider 1 instead of Provider 2", "Provider 3 instead of Provider 2", "Model 1 instead of Model 2", "Model 3 instead of Model 2", "Method 1 instead of Method 2", "Method 3 instead of Method 2"]
+    effects = [(model.predict([[1,0,0,0,1,0,0,1,0]]) - model.predict([[0,1,0,0,1,0,0,1,0]]))[0][0], 
+               (model.predict([[0,0,1,0,1,0,0,1,0]]) - model.predict([[0,1,0,0,1,0,0,1,0]]))[0][0], 
+               (model.predict([[0,1,0,1,0,0,0,1,0]]) - model.predict([[0,1,0,0,1,0,0,1,0]]))[0][0], 
+               (model.predict([[0,1,0,0,0,1,0,1,0]]) - model.predict([[0,1,0,0,1,0,0,1,0]]))[0][0], 
+               (model.predict([[0,1,0,0,1,0,1,0,0]]) - model.predict([[0,1,0,0,1,0,0,1,0]]))[0][0], 
+               (model.predict([[0,1,0,0,1,0,0,0,1]]) - model.predict([[0,1,0,0,1,0,0,1,0]]))[0][0]]
+    
+    print("Machine predicted relationships:              Effect on Radius")
+    for i in range(len(columns)):
+        print("Using {:<44} +{:.2f}".format(columns[i], effects[i]))
+
+
+# introduction to the theory behind this program
+print("\nAssume we have a data table with categories:")
+print("Provider | Cell Phone Model | Location Tracking Method | Predicted Radius (metres)\n")
+
+print("Further assume for simplicity that each data point has the following effect")
+print("on the predicted radius:")
+print("Provider 1 => +6\nProvider 2 => 0\nProvider 3 => +8\nModel 1 => +4\nModel 2 => +2\nModel 3 => +5\nMethod 1 => +10\nMethod 2 => -1\nMethod 3 => +7")
+
+print("\nSo for example, we would expect the Predicted Radius of a caller with Provider 1,\nModel 2, using Method 3, to be: 6 + 2 + 7 = 15 (metres)\n")
+
+# Generate a theoretical dataset and visualize a small subset
+time1 = time.perf_counter()
+calls = generate_calls(1000)
+print("A sample of a theoretical dataset:")
+print_calls(calls[:5])
+
+
+# We need to augment this dataset to apply Machine Learning to it
+# Specifically, we need to trasform each of Provider, Model, and Method into
+# three separate categories, which will have a value of 1 or 0
+calls = augment_calls(calls)
+print("A sample of an augmented theoretical dataset:")
+print_calls(calls[:5], True)
+
+
+# We can now train our Machine Learning Model with this dataset
+# First, split up the dataset into training and testing data
+train = calls[0:800]
+test = calls[800:len(calls)]
+
+# Now, we want to separate the "answers" (radius) from our training 
+# and test data to prevent the model from "cheating"
+train, train_answers = split_training_data(train)
+test, test_answers = split_training_data(test)
+
+# We now create and train the model to conform to the rules in our
+# training data
+model = create_model(train)
+history = model.fit(train, train_answers, epochs = 100, verbose = 0)
+
+# We can use Pandas to visualize the progress of our model
+print("\nProgression of the last 5 training \"cycles\" of our model")
+hist = pd.DataFrame(history.history)
+print(hist.tail())
+print()
+
+# Now, lets test our model on examples that it has not seen before,
+# and see how it performs
+test_predictions = model.predict(test)
+print("Test results:")
+test_accuracy(test_predictions, test_answers)
+print()
+
+# Now that we are confident that our model is accurate, we can see
+# how our model thinks different elements of a call effect the location
+# radius
+find_correlation(model)
+print()
+print("We see from this that our model has come very close to correctly identifying the exact\nrelationships between columns in our dataset. For example, it has found that Provider 1 is about 6 metres\n\"worse\" than Provider 2, which is what we would expect.")
+
+print("Finished, ran in {:.2f} seconds".format(time.perf_counter() - time1))
